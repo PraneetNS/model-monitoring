@@ -8,39 +8,56 @@ from ml_monitor.monitoring.alerts import AlertManager, AlertThresholds
 from ml_monitor.drift_detection.statistical import StatisticalDriftDetector
 from ml_monitor.utils.visualization import plot_feature_distribution
 
-# --------------------------------------------------
-# Page config
-# --------------------------------------------------
-st.set_page_config(page_title="ML Model Monitoring", layout="wide")
 
-# --------------------------------------------------
-# UI
-# --------------------------------------------------
+# ==================================================
+# Page config
+# ==================================================
+st.set_page_config(page_title="ML Model Monitoring", layout="wide")
 st.title("📊 ML Model Monitoring & Drift Detection")
 
-st.sidebar.header("Configuration")
+# ==================================================
+# Sidebar – Dataset selection
+# ==================================================
+st.sidebar.header("Dataset Selection")
 
-model_path = st.sidebar.text_input(
-    "Trained model / pipeline", "model_numeric.pkl"
+dataset_choice = st.sidebar.selectbox(
+    "Choose dataset",
+    [
+        "Loan Default Dataset",
+        "California Housing Dataset",
+    ],
 )
 
-reference_path = st.sidebar.text_input(
-    "Reference data CSV", "data/reference.csv"
-)
+DATASET_CONFIG = {
+    "Loan Default Dataset": {
+        "reference": "data/reference.csv",
+        "current": "data/current.csv",
+        "model": "model_numeric.pkl",
+        "type": "classification",
+        "description": "Binary classification: loan default prediction",
+    },
+    "California Housing Dataset": {
+        "reference": "data/reference_california.csv",
+        "current": "data/current_california.csv",
+        "model": "models/model_california.pkl",
+        "type": "regression",
+        "description": "Regression: median house value prediction",
+    },
+}
 
-current_path = st.sidebar.text_input(
-    "Current data CSV", "data/current.csv"
-)
+cfg = DATASET_CONFIG[dataset_choice]
+dataset_type = cfg["type"]
+
+st.sidebar.markdown(f"**Task type:** {dataset_type.capitalize()}")
+st.sidebar.caption(cfg["description"])
 
 run_monitoring = st.sidebar.button("Run Monitoring")
 
-# --------------------------------------------------
-# Helper
-# --------------------------------------------------
+# ==================================================
+# Helper: load & prepare data
+# ==================================================
 def load_and_prepare(path: str):
     df = pd.read_csv(path)
-
-    # KEEP ONLY NUMERIC COLUMNS (IMPORTANT)
     df = df.select_dtypes(include=["number"])
 
     if df.shape[1] < 2:
@@ -48,46 +65,46 @@ def load_and_prepare(path: str):
 
     X = df.iloc[:, :-1]
     y = df.iloc[:, -1]
-
     return X, y
 
-# --------------------------------------------------
+
+# ==================================================
 # Main logic
-# --------------------------------------------------
+# ==================================================
 if run_monitoring:
     try:
         # -----------------------------
         # Load data
         # -----------------------------
-        st.subheader("📥 Loading data")
+        st.subheader("📥 Data Loading")
 
-        X_ref, y_ref = load_and_prepare(reference_path)
-        X_cur, y_cur = load_and_prepare(current_path)
+        X_ref, y_ref = load_and_prepare(cfg["reference"])
+        X_cur, y_cur = load_and_prepare(cfg["current"])
 
-        st.write("Reference data shape:", X_ref.shape)
-        st.write("Current data shape:", X_cur.shape)
+        col1, col2 = st.columns(2)
+        col1.metric("Reference rows", X_ref.shape[0])
+        col2.metric("Current rows", X_cur.shape[0])
 
         st.success("Data loaded successfully")
 
         # -----------------------------
         # Load model
         # -----------------------------
-        st.subheader("🤖 Loading model / pipeline")
+        st.subheader("🤖 Model Loading")
 
-        model = joblib.load(model_path)
+        model = joblib.load(cfg["model"])
         st.success("Model loaded")
 
         # -----------------------------
         # Setup monitoring
         # -----------------------------
         drift_detector = StatisticalDriftDetector()
-
-        thresholds = AlertThresholds(
-            accuracy=0.75,
-            prediction_shift=0.3,
+        alert_manager = AlertManager(
+            thresholds=AlertThresholds(
+                accuracy=0.75,
+                prediction_shift=0.3,
+            )
         )
-
-        alert_manager = AlertManager(thresholds=thresholds)
 
         monitor = ModelMonitor(
             model=model,
@@ -95,55 +112,82 @@ if run_monitoring:
             alert_manager=alert_manager,
         )
 
-        st.session_state.monitor = monitor
-
-        # -----------------------------
-        # Run monitoring (OLD SIMPLE FLOW)
-        # -----------------------------
-        st.subheader("🔍 Running monitoring")
-
         monitor.set_reference(X_ref, y_ref)
         results = monitor.monitor(X_cur, y_cur)
 
+        st.session_state.monitor = monitor
         st.session_state.results = results
 
         # ==================================================
-        # PERFORMANCE (HUMAN FRIENDLY)
+        # PERFORMANCE SECTION
         # ==================================================
-        st.subheader("📈 Model Performance (Easy Summary)")
+        st.divider()
+        st.header("📈 Model Performance")
 
         perf = results.get("performance")
 
         if not perf:
-            st.info("No labels provided — performance metrics unavailable.")
-        else:
-            accuracy = perf.get("accuracy", 0.0)
-            f1 = perf.get("f1_score", 0.0)
+            st.info("Performance metrics are unavailable (labels not provided).")
 
-            if accuracy >= 0.8:
-                st.success("✅ Model performance is healthy.")
+        elif dataset_type == "classification":
+            acc = perf.get("accuracy", 0)
+            prec = perf.get("precision", 0)
+            rec = perf.get("recall", 0)
+            f1 = perf.get("f1_score", 0)
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Accuracy", f"{acc:.1%}")
+            col2.metric("Precision", f"{prec:.2f}")
+            col3.metric("Recall", f"{rec:.2f}")
+            col4.metric("F1 Score", f"{f1:.2f}")
+
+            if acc >= 0.8:
+                st.success("✅ Classification performance is healthy.")
             else:
-                st.warning("⚠️ Model performance may be degrading.")
+                st.warning("⚠️ Classification performance may be degrading.")
 
-            col1, col2 = st.columns(2)
+            st.caption(
+                "Accuracy shows overall correctness. "
+                "Precision & Recall show error trade-offs. "
+                "F1 balances both."
+            )
 
-            with col1:
-                st.metric("Overall Accuracy", f"{accuracy:.1%}")
+        else:  # REGRESSION
+            r2 = perf.get("r2_score")
+            mae = perf.get("mae")
+            rmse = perf.get("rmse")
 
-            with col2:
-                st.metric("Prediction Quality (F1 Score)", f"{f1:.2f}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("R² Score", f"{r2:.2f}")
+            col2.metric("MAE", f"{mae:.2f}")
+            col3.metric("RMSE", f"{rmse:.2f}")
+
+            if r2 >= 0.6:
+                st.success("✅ Model predictions are stable.")
+            else:
+                st.warning("⚠️ Predictive power may be degrading.")
+
+            st.caption(
+                "R² measures explained variance. "
+                "MAE shows average error. "
+                "RMSE penalizes large errors."
+            )
 
         # ==================================================
-        # DATA DRIFT
+        # DATA DRIFT SECTION
         # ==================================================
-        st.subheader("🧠 Data Changes (Easy Summary)")
+        st.divider()
+        st.header("🧠 Data Drift Analysis")
 
         drift = results.get("drift", {})
 
         if not drift or not drift.get("drift_detected"):
-            st.success("✅ Incoming data is consistent with historical data.")
+            st.success("✅ No significant data drift detected.")
         else:
-            st.warning("⚠️ Incoming data is different from historical data.")
+            st.warning("⚠️ Data drift detected")
+
+            drift_score = drift.get("drift_score", 0)
+            st.metric("Drift Score", f"{drift_score:.3f}")
 
             feature_results = drift.get("feature_results", {})
             drifted_features = [
@@ -151,14 +195,22 @@ if run_monitoring:
                 if v.get("drift_detected")
             ]
 
-            if drifted_features:
-                st.write("**Main changes detected in:**")
-                for f in drifted_features:
-                    st.write(f"• {f}")
+            st.write(
+                f"**{len(drifted_features)} features show statistical change:**"
+            )
 
-                st.subheader("📊 Feature Distribution Changes")
+            for f in drifted_features:
+                st.write(f"• {f}")
+
+            st.caption(
+                "Drift indicates changes in data distribution. "
+                "It does not mean the model is broken, but it should be monitored."
+            )
+
+            # Feature visualization
+            if drifted_features:
                 feature = st.selectbox(
-                    "Inspect a feature",
+                    "Inspect feature distribution",
                     drifted_features,
                 )
 
@@ -170,12 +222,35 @@ if run_monitoring:
                 st.pyplot(fig)
 
         # ==================================================
-        # ALERTS + ACTIONS
+        # PREDICTION BEHAVIOR
         # ==================================================
-        st.subheader("🚨 Alerts & Recommended Actions")
+        st.divider()
+        st.header("📊 Prediction Behavior")
 
-        if "selected_action" not in st.session_state:
-            st.session_state.selected_action = None
+        preds = results.get("predictions", {})
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Mean", f"{preds.get('mean', 0):.2f}")
+        col2.metric("Std Dev", f"{preds.get('std', 0):.2f}")
+        col3.metric("Min", f"{preds.get('min', 0):.2f}")
+        col4.metric("Max", f"{preds.get('max', 0):.2f}")
+
+        if dataset_type == "regression":
+            st.info(
+                "Prediction statistics show how estimated values are distributed. "
+                "Large shifts in mean or spread may indicate market or population changes."
+            )
+        else:
+            st.info(
+                "Prediction distribution helps detect abnormal model behavior "
+                "even if accuracy appears stable."
+            )
+
+        # ==================================================
+        # ALERTS
+        # ==================================================
+        st.divider()
+        st.header("🚨 Alerts (Human-Readable)")
 
         alerts = results.get("alerts", [])
 
@@ -183,40 +258,19 @@ if run_monitoring:
             st.success("No alerts triggered.")
         else:
             for alert in alerts:
-                human_alert = format_alert_for_humans(alert)
+                human = format_alert_for_humans(alert)
 
-                st.warning(f"**{human_alert['title']}**")
-                st.write(human_alert["message"])
+                st.warning(f"⚠️ {human['title']}")
+                st.write(human["message"])
 
-                if human_alert.get("affected_features"):
+                if human.get("affected_features"):
                     st.write(
                         "**Affected features:** "
-                        + ", ".join(human_alert["affected_features"])
+                        + ", ".join(human["affected_features"])
                     )
 
-                for action in human_alert.get("actions", []):
-                    if st.button(action["label"], key=action["id"]):
-                        st.session_state.selected_action = action["id"]
-
-        # ==================================================
-        # ACTION DETAILS
-        # ==================================================
-        selected = st.session_state.get("selected_action")
-
-        if selected == "review_features":
-            st.subheader("📊 Feature Distribution Review")
-            st.write("Inspect how feature distributions changed over time.")
-
-        elif selected == "monitor_performance":
-            st.subheader("📈 Performance Monitoring")
-            st.write("Track performance metrics across monitoring cycles.")
-
-        elif selected == "plan_retraining":
-            st.subheader("🔁 Retraining Strategy")
-            st.write(
-                "Retraining is recommended if drift persists across "
-                "multiple monitoring runs."
-            )
+                if human.get("recommended_action"):
+                    st.info(f"👉 {human['recommended_action']}")
 
     except Exception as e:
         st.error(f"Error: {e}")
@@ -224,16 +278,20 @@ if run_monitoring:
 # ==================================================
 # ALERT HISTORY
 # ==================================================
-st.subheader("🕒 Alert History")
+st.divider()
+st.header("🕒 Alert History")
 
 monitor = st.session_state.get("monitor")
 
 if monitor:
     history = monitor.get_history(limit=10)
 
-    for record in reversed(history):
-        ts = record["timestamp"]
-        for alert in record.get("alerts", []):
-            human_alert = format_alert_for_humans(alert)
-            with st.expander(f"{ts} — {human_alert['title']}"):
-                st.write(human_alert["message"])
+    if not history:
+        st.info("No historical alerts yet.")
+    else:
+        for record in reversed(history):
+            ts = record["timestamp"]
+            for alert in record.get("alerts", []):
+                human = format_alert_for_humans(alert)
+                with st.expander(f"{ts} — {human['title']}"):
+                    st.write(human["message"])
