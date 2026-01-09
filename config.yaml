@@ -1,0 +1,43 @@
+# ML Monitor Configuration
+
+# Drift Detection Settings
+drift_detection:
+  method: "ks_test"  # Options: "ks_test", "psi", "ml_based"
+  threshold: 0.05
+  ml_based_threshold: 0.6
+
+# Monitoring Settings
+monitoring:
+  check_interval: 3600  # seconds
+  performance_threshold:
+    accuracy: 0.7
+    r2_score: 0.5
+  prediction_shift_threshold: 0.2
+
+# Alert Settings
+alerts:
+  enabled: true
+  channels:
+    - "console"
+    # - "email"
+    # - "slack"
+  levels:
+    - "warning"
+    - "critical"
+
+# Data Settings
+data:
+  validation:
+    strict_schema: false
+    allow_extra_columns: true
+  preprocessing:
+    handle_missing: true
+    missing_strategy: "mean"  # Options: "mean", "median", "mode", "drop"
+    normalize: false
+    normalization_method: "standard"  # Options: "standard", "minmax"
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/monitor.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
