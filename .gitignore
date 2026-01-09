@@ -77,3 +77,7 @@ drift_reports/
 
 # OS
 Thumbs.db
+# Model artifacts
+*.pkl
+*.joblib
+models/
