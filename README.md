@@ -232,4 +232,3 @@ ml_monitor/
     └── visualization.py   # Basic plotting utilities
 ```
 
-Tests and additional examples are under `tests/` and `examples/`. Use them as reference implementations when integrating the toolkit into your own pipelines. 
