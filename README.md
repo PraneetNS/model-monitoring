@@ -196,11 +196,7 @@ This script:
 python examples/load_and_use_model.py
 ```
 
-This script:
-- loads a saved model and reference statistics,
-- generates new data,
-- sets up a `ModelMonitor` with a drift detector,
-- runs monitoring and prints drift, performance metrics, and alerts.
+
 
 - **Advanced drift and alert comparison**:
 
